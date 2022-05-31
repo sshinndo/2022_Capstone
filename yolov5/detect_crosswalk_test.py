@@ -1,4 +1,7 @@
 # YOLOv5 🚀 by Ultralytics, GPL-3.0 license
+
+# Run Code
+# python detect_crosswalk_test.py --source 0 --weights best_aug3.pt --conf 0.3 --line-thickness 2 --save-txt --save-conf
 """
 Run inference on images, videos, directories, streams, etc.
 
