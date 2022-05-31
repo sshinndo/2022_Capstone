@@ -31,6 +31,18 @@ from pathlib import Path
 
 import torch
 import torch.backends.cudnn as cudnn
+import numpy as np
+import cv2 as cv
+
+#//////////////
+
+
+
+#from torchvision.transforms import ToTensor, ToPILImage
+#from PIL import Image
+
+#from google.colab.patches import cv_imshow
+#///////////
 
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[0]  # YOLOv5 root directory
@@ -44,9 +56,12 @@ from utils.general import (LOGGER, check_file, check_img_size, check_imshow, che
                            increment_path, non_max_suppression, print_args, scale_coords, strip_optimizer, xyxy2xywh)
 from utils.plots import Annotator, colors, save_one_box
 from utils.torch_utils import select_device, time_sync
-flag=0  #flag는 횡단보도 영역 첫 검출
+flag=0 #flag는 횡단보도 영역 첫 검출
 
 @torch.no_grad()
+def f(x, a1, b1):
+    return a1 * x + b1
+
 def run(
         weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
         source=ROOT / 'data/images',  # file/dir/URL/glob, 0 for webcam
@@ -113,10 +128,19 @@ def run(
         im = torch.from_numpy(im).to(device)
         im = im.half() if model.fp16 else im.float()  # uint8 to fp16/32
         im /= 255  # 0 - 255 to 0.0 - 1.0
+
+        ''''''
         if len(im.shape) == 3:
             im = im[None]  # expand for batch dim
+        ''''''
         t2 = time_sync()
         dt[0] += t2 - t1
+
+
+
+        #자전거 횡단도로 detection
+        print("/////////////////////////////")
+        print(a, b)
 
         # Inference
         visualize = increment_path(save_dir / Path(path).stem, mkdir=True) if visualize else False
@@ -132,7 +156,6 @@ def run(
         #violate는 횡단보도 영역안에 이륜차 탑승 객체가 있을때 1로 변함
         violate = 0
 
-
         #만약 횡단보도가 검출 된다면 
         cal_pred = pred
         print(len(cal_pred[0]))
@@ -145,14 +168,26 @@ def run(
               stand_y_min = cal_pred[0][i][1]
               stand_y_max = cal_pred[0][i][3]
 
+        # 만약 자전거 횡단도로 위에 있다면
+        #abno[0], abno[1]
 
-        #횡단보도가 검출됬을때
+
+
+        #횡단보도가 검출됬을때  1:자전거 4:킥보드 7:오토바이
         if flag >= 1:
           for i in range(len(cal_pred[0])):
             if(cal_pred[0][i][5]== 1):
 
               vio_stand = (cal_pred[0][i][0] + cal_pred[0][i][2])/2
-              if(vio_stand<stand_x_max and vio_stand>stand_x_min):
+              vio_stand_y = (cal_pred[0][i][1] + cal_pred[0][i][3]) / 2
+
+
+
+              # 자전거 도로에서 자전거 달릴시 위법행위 x:
+              if vio_stand > int((vio_stand_y - b) / a):
+                  violate = 0
+
+              elif(vio_stand<stand_x_max and vio_stand>stand_x_min):
                 violate = 1
 
             if(cal_pred[0][i][5]== 4):
@@ -162,6 +197,10 @@ def run(
                 violate = 1
                
             if(cal_pred[0][i][5]== 7):
+
+              #자전거 도로에서 오토바이 달릴 시 위법행위 o:
+              if vio_stand > int((vio_stand_y - b) / a):
+                  violate = 1
 
               vio_stand = (cal_pred[0][i][0] + cal_pred[0][i][2])/2
               if(vio_stand<stand_x_max and vio_stand>stand_x_min):
@@ -228,6 +267,12 @@ def run(
                 im0 = cv2.putText(im0, "crosswalk", (int(stand_x_min), int(stand_y_min)), font, 2, white, 1, cv2.LINE_8)
                 im0 = cv2.putText(im0, "Find CROSSWALK!! Detecting violate!!", (00,30), font, 2, (255,255,255), cv2.LINE_4)
                 im0 = cv2.rectangle(im0,(int(stand_x_min),int(stand_y_min)),(int(stand_x_max),int(stand_y_max)),red,3)
+
+                y1 = b
+                y2 = 640 * a + b
+                im0 = cv.line(im0, (0, int(y1)), (640, int(y2)), (255, 0, 0), 2)
+
+
                 if violate ==1:
                     red= (0, 0, 255)
                     # 폰트 지정
@@ -319,8 +364,102 @@ def parse_opt():
     return opt
 
 
+def detect_bike_road():
+    global a
+    global b
+    import numpy as np
+
+    capture = cv.VideoCapture(0)
+    capture.set(cv.CAP_PROP_FRAME_WIDTH, 640)
+    capture.set(cv.CAP_PROP_FRAME_HEIGHT, 480)
+
+    while cv.waitKey(33) < 0:
+        ret, frame = capture.read()
+        cv.imshow("VideoFrame", frame)
+
+    capture.release()
+    cv.destroyAllWindows()
+
+    src = cv.cvtColor(frame, cv.COLOR_BGR2HSV)
+    dst = cv.inRange(src, (170, 30, 0), (180, 255, 255))
+    dst2 = cv.inRange(src, (0, 30, 0), (10, 255, 255))
+
+    h4 = cv.addWeighted(dst, 1.0, dst2, 1, 0)
+
+    bike_road = cv.bitwise_and(src, src, mask=h4)
+    bike_road = cv.cvtColor(bike_road, cv.COLOR_HSV2BGR)
+
+    bike_road_gray = cv.cvtColor(bike_road, cv.COLOR_BGR2GRAY)
+
+    for i in range(bike_road_gray.shape[1]):
+        for j in range(bike_road_gray.shape[0]):
+            if (bike_road_gray[j][i] > 0):
+                bike_road_gray[j][i] = 255
+
+    bike_road_gray_no = cv.medianBlur(bike_road_gray, 5)
+
+    lx = cv.Sobel(bike_road_gray_no, ddepth=cv.CV_64F, dx=1, dy=0, ksize=3)
+    ly = cv.Sobel(bike_road_gray_no, ddepth=cv.CV_64F, dx=0, dy=1, ksize=3)
+    mag = np.sqrt(np.square(lx) + np.square(ly))
+    ori = np.arctan2(ly, lx) * 180 / np.pi
+
+    lx_ = (lx - lx.min()) / (lx.max() - lx.min()) * 255
+    ly_ = (ly - ly.min()) / (ly.max() - ly.min()) * 255
+    mag_ = (mag - mag.min()) / (mag.max() - mag.min()) * 255
+    ori_ = (ori - ori.min()) / (ori.max() - ori.min()) * 255
+
+    result1 = np.zeros(bike_road_gray_no.shape)
+    id1 = np.where(mag > 400)
+    result1[id1] = 255
+
+    result2 = np.zeros(bike_road_gray_no.shape)
+    id2 = np.where((mag > 100) & (ori > 0) & (ori < 40))
+    result2[id2] = 255
+
+    result3 = np.zeros(bike_road_gray_no.shape)
+    id3 = np.where((mag > 100) & (ori > -70) & (ori < 0))
+    result3[id3] = 255
+
+    import numpy as np
+    import matplotlib.pyplot as plt
+
+    #def f(x, a1, b1):
+     #   return a1 * x + b1
+
+    def ransac_line_fitting(x, y, r, t):
+        iter = np.round(np.log(1 - 0.999) / np.log(1 - (1 - r) ** 2) + 1)
+        num_max = 0
+        for i in np.arange(iter):
+            id = np.random.permutation(len(x))
+            xs = x[id[:2]]
+            ys = y[id[:2]]
+            A = np.vstack([xs, np.ones(len(xs))]).T
+            ab = np.dot(np.linalg.inv(np.dot(A.T, A)), np.dot(A.T, ys))
+            dist = np.abs(ab[0] * x - y + ab[1]) / np.sqrt(ab[0] ** 2 + 1)
+            numInliers = sum(dist < t)
+            if numInliers > num_max:
+                ab_max = ab
+                num_max = numInliers
+        return ab_max, num_max
+
+    xno = id2[1]
+    yno = id2[0]
+    abno, max = ransac_line_fitting(xno, yno, 0.5, 2)
+
+    print(abno[0], abno[1])
+
+    #y1 = f(0, abno[0], abno[1])
+    #y2 = f(src.shape[1], abno[0], abno[1])
+
+    a = abno[0]
+    b = abno[1]
+    #return a, b
+
 def main(opt):
     check_requirements(exclude=('tensorboard', 'thop'))
+
+    detect_bike_road()
+    #a, b = detect_bike_road()
     run(**vars(opt))
 
 
