@@ -28,19 +28,21 @@ Usage - formats:
 """
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
 import torch
 import torch.backends.cudnn as cudnn
-import numpy as np
 import cv2 as cv
-#//////////////
 
+# CUSTOM Module import [Start]
 from multiprocessing import Process, Queue
+import Upload_to_Server_script as us
+import Detect_bike_road as dbr
+import os
+global a, b
 
-#///////////
+# CUSTOM Module import [End]
 
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[0]  # YOLOv5 root directory
@@ -115,11 +117,13 @@ def run(
     else:
         dataset = LoadImages(source, img_size=imgsz, stride=stride, auto=pt)
         bs = 1  # batch_size
+
     vid_path, vid_writer = [None] * bs, [None] * bs
 
     # Run inference
     model.warmup(imgsz=(1 if pt else bs, 3, *imgsz))  # warmup
     dt, seen = [0.0, 0.0, 0.0], 0
+
     for path, im, im0s, vid_cap, s in dataset:
         global flag
         t1 = time_sync()
@@ -133,8 +137,6 @@ def run(
         ''''''
         t2 = time_sync()
         dt[0] += t2 - t1
-
-
 
         #자전거 횡단도로 detection
         print("/////////////////////////////")
@@ -169,8 +171,6 @@ def run(
         # 만약 자전거 횡단도로 위에 있다면
         #abno[0], abno[1]
 
-
-
         #횡단보도가 검출됬을때  1:자전거 4:킥보드 7:오토바이
         if flag >= 1:
           for i in range(len(cal_pred[0])):
@@ -178,8 +178,6 @@ def run(
 
               vio_stand = (cal_pred[0][i][0] + cal_pred[0][i][2])/2
               vio_stand_y = (cal_pred[0][i][1] + cal_pred[0][i][3]) / 2
-
-
 
               # 자전거 도로에서 자전거 달릴시 위법행위 x:
               if vio_stand > int((vio_stand_y - b) / a):
@@ -206,9 +204,6 @@ def run(
 
 
         print(violate)
-
-
-
 
         # Second-stage classifier (optional)
         # pred = utils.general.apply_classifier(pred, classifier_model, im, im0s)
@@ -256,6 +251,7 @@ def run(
 
             # Stream results
             im0 = annotator.result()
+
             if(flag >= 1):
                 print("###########################################################################")
                 red= (0, 0, 255)
@@ -271,7 +267,7 @@ def run(
                 im0 = cv.line(im0, (0, int(y1)), (640, int(y2)), (255, 0, 0), 2)
 
 
-                if violate ==1:
+                if violate == 1:
                     red= (0, 0, 255)
                     # 폰트 지정
                     font =  cv2.FONT_HERSHEY_PLAIN
@@ -281,6 +277,7 @@ def run(
             if view_img:
                 cv2.imshow(str(p), im0)
                 cv2.waitKey(1)  # 1 millisecond
+
 
             # Save results (image with detections)
             if save_img:
@@ -292,7 +289,6 @@ def run(
                     # 이미지에 글자 합성하기
                     im0 = cv2.putText(im0, "violate!!!!", (350, 40), font, 2, white, 1, cv2.LINE_AA)
                   cv2.imwrite(save_path, im0)
-
                 else:  # 'video' or 'stream'
                     print(flag)
                     if(flag >= 1):
@@ -314,6 +310,8 @@ def run(
                         save_path = str(Path(save_path).with_suffix('.mp4'))  # force *.mp4 suffix on results videos
                         vid_writer[i] = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
                     vid_writer[i].write(im0)
+
+
 
         # Print time (inference-only)
         LOGGER.info(f'{s}Done. ({t3 - t2:.3f}s)')
@@ -361,126 +359,34 @@ def parse_opt():
     print_args(vars(opt))
     return opt
 
-
-def detect_bike_road():
-    global a
-    global b
-    import numpy as np
-
-    capture = cv.VideoCapture(0)
-    capture.set(cv.CAP_PROP_FRAME_WIDTH, 640)
-    capture.set(cv.CAP_PROP_FRAME_HEIGHT, 480)
-
-    while cv.waitKey(33) < 0:
-        ret, frame = capture.read()
-        cv.imshow("VideoFrame", frame)
-
-    capture.release()
-    cv.destroyAllWindows()
-
-    src = cv.cvtColor(frame, cv.COLOR_BGR2HSV)
-    dst = cv.inRange(src, (170, 30, 0), (180, 255, 255))
-    dst2 = cv.inRange(src, (0, 30, 0), (10, 255, 255))
-
-    h4 = cv.addWeighted(dst, 1.0, dst2, 1, 0)
-
-    bike_road = cv.bitwise_and(src, src, mask=h4)
-    bike_road = cv.cvtColor(bike_road, cv.COLOR_HSV2BGR)
-
-    bike_road_gray = cv.cvtColor(bike_road, cv.COLOR_BGR2GRAY)
-
-    for i in range(bike_road_gray.shape[1]):
-        for j in range(bike_road_gray.shape[0]):
-            if (bike_road_gray[j][i] > 0):
-                bike_road_gray[j][i] = 255
-
-    bike_road_gray_no = cv.medianBlur(bike_road_gray, 5)
-
-    lx = cv.Sobel(bike_road_gray_no, ddepth=cv.CV_64F, dx=1, dy=0, ksize=3)
-    ly = cv.Sobel(bike_road_gray_no, ddepth=cv.CV_64F, dx=0, dy=1, ksize=3)
-    mag = np.sqrt(np.square(lx) + np.square(ly))
-    ori = np.arctan2(ly, lx) * 180 / np.pi
-
-    lx_ = (lx - lx.min()) / (lx.max() - lx.min()) * 255
-    ly_ = (ly - ly.min()) / (ly.max() - ly.min()) * 255
-    mag_ = (mag - mag.min()) / (mag.max() - mag.min()) * 255
-    ori_ = (ori - ori.min()) / (ori.max() - ori.min()) * 255
-
-    result1 = np.zeros(bike_road_gray_no.shape)
-    id1 = np.where(mag > 400)
-    result1[id1] = 255
-
-    result2 = np.zeros(bike_road_gray_no.shape)
-    id2 = np.where((mag > 100) & (ori > 0) & (ori < 40))
-    result2[id2] = 255
-
-    result3 = np.zeros(bike_road_gray_no.shape)
-    id3 = np.where((mag > 100) & (ori > -70) & (ori < 0))
-    result3[id3] = 255
-
-    import numpy as np
-    import matplotlib.pyplot as plt
-
-    #def f(x, a1, b1):
-     #   return a1 * x + b1
-
-    def ransac_line_fitting(x, y, r, t):
-        iter = np.round(np.log(1 - 0.999) / np.log(1 - (1 - r) ** 2) + 1)
-        num_max = 0
-        for i in np.arange(iter):
-            id = np.random.permutation(len(x))
-            xs = x[id[:2]]
-            ys = y[id[:2]]
-            A = np.vstack([xs, np.ones(len(xs))]).T
-            ab = np.dot(np.linalg.inv(np.dot(A.T, A)), np.dot(A.T, ys))
-            dist = np.abs(ab[0] * x - y + ab[1]) / np.sqrt(ab[0] ** 2 + 1)
-            numInliers = sum(dist < t)
-            if numInliers > num_max:
-                ab_max = ab
-                num_max = numInliers
-        return ab_max, num_max
-
-    xno = id2[1]
-    yno = id2[0]
-    abno, max = ransac_line_fitting(xno, yno, 0.5, 2)
-
-    print(abno[0], abno[1])
-
-    #y1 = f(0, abno[0], abno[1])
-    #y2 = f(src.shape[1], abno[0], abno[1])
-
-    a = abno[0]
-    b = abno[1]
-    #return a, b
-
-def main(opt):
-    check_requirements(exclude=('tensorboard', 'thop'))
-    send_q.put(["20210304", "aicenter", 1, 1, "image1.jpg", "image2.jpg"])
-    detect_bike_road()
-    #a, b = detect_bike_road()
-    run(**vars(opt))
-
-import Upload_to_Server_script as us
-import os
-
 def info(title):
+    print('#############################')
     print(title)
-    print('module name:', __name__)
+    print('Multi-Processor information')
     print('parent process:', os.getppid())
     print('process id:', os.getpid())
-
+    print('#############################')
 
 def SendtoServer(q):
-    info('function Send to Server')
+    info('Send_to_Server function is now ONLINE')
     while (1):
         if (not q.empty()):
             us.main(q.get())
 
+def main(opt):
+    global a, b
+    send_q = Queue() # Queue for Multi-Processor (Not python Queue)
+    p = Process(target=SendtoServer, args=(send_q,))
+    send_q.put(["20210304", "aicenter", 1, 1, "image1.jpg", "image2.jpg"])  # test data
+    p.start()
+    p.join
+
+    check_requirements(exclude=('tensorboard', 'thop'))
+    a, b = dbr.main() # Detect_bike_road()
+    run(**vars(opt))
+
 if __name__ == "__main__":
     opt = parse_opt()
-    send_q = Queue()
-    p = Process(target=SendtoServer, args=(send_q,))
-    p.start()
     main(opt)
-    p.join
+
 # python detect_crosswalk_test.py --source 0 --weights best_aug3.pt --conf 0.3 --line-thickness 2 --save-txt --save-conf
