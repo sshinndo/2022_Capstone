@@ -36,15 +36,10 @@ import torch
 import torch.backends.cudnn as cudnn
 import numpy as np
 import cv2 as cv
-
 #//////////////
 
+from multiprocessing import Process, Queue
 
-
-#from torchvision.transforms import ToTensor, ToPILImage
-#from PIL import Image
-
-#from google.colab.patches import cv_imshow
 #///////////
 
 FILE = Path(__file__).resolve()
@@ -460,12 +455,32 @@ def detect_bike_road():
 
 def main(opt):
     check_requirements(exclude=('tensorboard', 'thop'))
-
+    send_q.put(["20210304", "aicenter", 1, 1, "image1.jpg", "image2.jpg"])
     detect_bike_road()
     #a, b = detect_bike_road()
     run(**vars(opt))
 
+import Upload_to_Server_script as us
+import os
+
+def info(title):
+    print(title)
+    print('module name:', __name__)
+    print('parent process:', os.getppid())
+    print('process id:', os.getpid())
+
+
+def SendtoServer(q):
+    info('function Send to Server')
+    while (1):
+        if (not q.empty()):
+            us.main(q.get())
 
 if __name__ == "__main__":
     opt = parse_opt()
+    send_q = Queue()
+    p = Process(target=SendtoServer, args=(send_q,))
+    p.start()
     main(opt)
+    p.join
+# python detect_crosswalk_test.py --source 0 --weights best_aug3.pt --conf 0.3 --line-thickness 2 --save-txt --save-conf
