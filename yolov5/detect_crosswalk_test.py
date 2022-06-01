@@ -154,6 +154,7 @@ def run(
         #print(pred[0][0])
         #flag는 횡단보도 검출 여부
         #violate는 횡단보도 영역안에 이륜차 탑승 객체가 있을때 1로 변함
+
         violate = 0
 
         #만약 횡단보도가 검출 된다면 
@@ -273,7 +274,13 @@ def run(
                     font =  cv2.FONT_HERSHEY_PLAIN
                     # 이미지에 글자 합성하기
                     im0 = cv2.putText(im0, "violate!!!!", (350, 40), font, 2, red, 1, cv2.LINE_AA)
-
+                    global cnt, num
+                    cnt, num = 0, 0
+                    cnt += 1
+                    if(cnt >= 4):
+                        cv2.imwrite('{}.jpg'.format(num), im0)
+                        num += 1
+                        cnt = 0
             if view_img:
                 cv2.imshow(str(p), im0)
                 cv2.waitKey(1)  # 1 millisecond
