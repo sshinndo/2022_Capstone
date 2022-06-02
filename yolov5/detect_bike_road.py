@@ -1,28 +1,35 @@
 import cv2 as cv
 import numpy as np
+import os
 
 def ransac_line_fitting(x, y, r, t):
-    iter = np.round(np.log(1 - 0.999) / np.log(1 - (1 - r) ** 2) + 1)
-    num_max = 0
-    for i in np.arange(iter):
-        id = np.random.permutation(len(x))
-        xs = x[id[:2]]
-        ys = y[id[:2]]
-        A = np.vstack([xs, np.ones(len(xs))]).T
-        ab = np.dot(np.linalg.inv(np.dot(A.T, A)), np.dot(A.T, ys))
-        dist = np.abs(ab[0] * x - y + ab[1]) / np.sqrt(ab[0] ** 2 + 1)
-        numInliers = sum(dist < t)
-        if numInliers > num_max:
-            ab_max = ab
-            num_max = numInliers
-    return ab_max, num_max
+    try:
+        iter = np.round(np.log(1 - 0.999) / np.log(1 - (1 - r) ** 2) + 1)
+        num_max = 0
+        for i in np.arange(iter):
+            id = np.random.permutation(len(x))
+            xs = x[id[:2]]
+            ys = y[id[:2]]
+            A = np.vstack([xs, np.ones(len(xs))]).T
+            ab = np.dot(np.linalg.inv(np.dot(A.T, A)), np.dot(A.T, ys))
+            dist = np.abs(ab[0] * x - y + ab[1]) / np.sqrt(ab[0] ** 2 + 1)
+            numInliers = sum(dist < t)
+            if numInliers > num_max:
+                ab_max = ab
+                num_max = numInliers
+        return ab_max, num_max
+
+    except:
+        print("[info] ransec 에러 : 예외처리 되었습니다. 재시도")
+        terminal_command = "python detect_crosswalk_test.py --source 0 --weights best_aug3.pt --conf 0.3 --line-thickness 2 --save-txt --save-conf"
+        os.system(terminal_command)
 
 def main():
     capture = cv.VideoCapture(0)
     capture.set(cv.CAP_PROP_FRAME_WIDTH, 640)
     capture.set(cv.CAP_PROP_FRAME_HEIGHT, 480)
 
-    print("Detecting_Bike_fuction is now ONLINE")
+    print("[info] Detecting_Bike function is now ONLINE")
     ret, frame = capture.read()
 
     capture.release()
