@@ -31,17 +31,22 @@ import argparse
 import sys
 from pathlib import Path
 
+import pandas as pd
 import torch
 import torch.backends.cudnn as cudnn
 import cv2 as cv
 
 # CUSTOM Module import [Start]
+from pytz import timezone as tz
+from datetime import datetime
 from multiprocessing import Process, Queue
-import Upload_to_Server_script as us
-import Detect_bike_road as dbr
+import upload_to_server as us
+import detect_bike_road as dbr
 import os
 global a, b
-
+global multi_p
+global frame_cnt, image_num
+frame_cnt, image_num = 0, 0
 # CUSTOM Module import [End]
 
 FILE = Path(__file__).resolve()
@@ -139,8 +144,8 @@ def run(
         dt[0] += t2 - t1
 
         #자전거 횡단도로 detection
-        print("/////////////////////////////")
-        print(a, b)
+        #print("/////////////////////////////")
+        #print(a, b)
 
         # Inference
         visualize = increment_path(save_dir / Path(path).stem, mkdir=True) if visualize else False
@@ -159,7 +164,7 @@ def run(
 
         #만약 횡단보도가 검출 된다면 
         cal_pred = pred
-        print(len(cal_pred[0]))
+        #print(len(cal_pred[0]))
         for i in range(len(cal_pred[0])):
           if(cal_pred[0][i][5] == 2):
             flag = flag +1
@@ -204,14 +209,14 @@ def run(
                 violate = 1
 
 
-        print(violate)
+        #print(violate)
 
         # Second-stage classifier (optional)
         # pred = utils.general.apply_classifier(pred, classifier_model, im, im0s)
 
         # Process predictions
         for i, det in enumerate(pred):  # per image
-            print(det)
+            #print(det)
             seen += 1
             if webcam:  # batch_size >= 1
                 p, im0, frame = path[i], im0s[i].copy(), dataset.count
@@ -254,9 +259,9 @@ def run(
             im0 = annotator.result()
 
             if(flag >= 1):
-                print("###########################################################################")
+                #print("###########################################################################")
                 red= (0, 0, 255)
-                print(int(stand_x_min),int(stand_y_min),int(stand_x_max),int(stand_y_max))
+                #print(int(stand_x_min),int(stand_y_min),int(stand_x_max),int(stand_y_max))
                 white = (255,255,255)
                 font =  cv2.FONT_HERSHEY_PLAIN
                 im0 = cv2.putText(im0, "crosswalk", (int(stand_x_min), int(stand_y_min)), font, 2, white, 1, cv2.LINE_8)
@@ -269,22 +274,44 @@ def run(
 
 
                 if violate == 1:
-                    red= (0, 0, 255)
-                    # 폰트 지정
-                    font =  cv2.FONT_HERSHEY_PLAIN
-                    # 이미지에 글자 합성하기
+                    global frame_cnt, image_num
+                    # Add words in image
+                    red = (0, 0, 255)
+                    font = cv2.FONT_HERSHEY_PLAIN
                     im0 = cv2.putText(im0, "violate!!!!", (350, 40), font, 2, red, 1, cv2.LINE_AA)
-                    global cnt, num
-                    cnt, num = 0, 0
-                    cnt += 1
-                    if(cnt >= 4):
-                        cv2.imwrite('{}.jpg'.format(num), im0)
-                        num += 1
-                        cnt = 0
+
+                    frame_cnt += 1
+
+                    if(frame_cnt >= 5): # 5프레임 연속 위반
+                        print("[info] 5프레임 연속 위반" + datetime.now(tz('Asia/Seoul')))
+                        # Save target images in temporary folder
+                        raw_root = "{}.jpg".format("raw" + str(image_num))
+                        result_root = "{}.jpg".format("result" + str(image_num))
+
+                        cv2.imwrite("tmp_raw_images/" + raw_root, imc)
+                        cv2.imwrite("tmp_result_images/" + result_root, im0)
+
+                        image_num += 1
+                        frame_cnt = 0
+
+                        # hand over json data to multi-processor by Queue
+                        present_time = datetime.now(tz('Asia/Seoul')).strftime("%Y-%m-%d %H:%M:%S")
+                        place = "Front AI center"
+                        detected_case = 3
+                        detected_class = 1
+                        send_q.put([present_time, place, detected_case, detected_class, raw_root, result_root])
+
+
+
             if view_img:
                 cv2.imshow(str(p), im0)
-                cv2.waitKey(1)  # 1 millisecond
+                key = cv2.waitKey(1)  # 1 millisecond
 
+            if key == ord('q') or key == 27:
+                global multi_p
+                multi_p.join()
+                LoadStreams.stop(LoadStreams.__class__)
+                exit()
 
             # Save results (image with detections)
             if save_img:
@@ -297,11 +324,11 @@ def run(
                     im0 = cv2.putText(im0, "violate!!!!", (350, 40), font, 2, white, 1, cv2.LINE_AA)
                   cv2.imwrite(save_path, im0)
                 else:  # 'video' or 'stream'
-                    print(flag)
+                    #print(flag)
                     if(flag >= 1):
-                          print("###########################################################################")
+                          #print("###########################################################################")
                           red= (0, 0, 255)
-                          print(int(stand_x_min),int(stand_y_min),int(stand_x_max),int(stand_y_max))
+                          #print(int(stand_x_min),int(stand_y_min),int(stand_x_max),int(stand_y_max))
                           im0 = cv2.rectangle(im0,(int(stand_x_min),int(stand_y_min)),(int(stand_x_max),int(stand_y_max)),red,3)
                     if vid_path[i] != save_path:  # new video
                         vid_path[i] = save_path
@@ -321,7 +348,7 @@ def run(
 
 
         # Print time (inference-only)
-        LOGGER.info(f'{s}Done. ({t3 - t2:.3f}s)')
+        #LOGGER.info(f'{s}Done. ({t3 - t2:.3f}s)')
 
     # Print results
     t = tuple(x / seen * 1E3 for x in dt)  # speeds per image
@@ -375,18 +402,17 @@ def info(title):
     print('#############################')
 
 def SendtoServer(q):
-    info('Send_to_Server function is now ONLINE')
+    info('[info] Send_to_Server function is now ONLINE')
     while (1):
         if (not q.empty()):
             us.main(q.get())
 
 def main(opt):
     global a, b
+    global multi_p, send_q
     send_q = Queue() # Queue for Multi-Processor (Not python Queue)
-    p = Process(target=SendtoServer, args=(send_q,))
-    send_q.put(["20210304", "aicenter", 1, 1, "image1.jpg", "image2.jpg"])  # test data
-    p.start()
-    p.join
+    multi_p = Process(target=SendtoServer, args=(send_q,))
+    multi_p.start()
 
     check_requirements(exclude=('tensorboard', 'thop'))
     a, b = dbr.main() # Detect_bike_road()

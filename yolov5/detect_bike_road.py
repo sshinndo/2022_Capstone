@@ -22,7 +22,7 @@ def main():
     capture.set(cv.CAP_PROP_FRAME_WIDTH, 640)
     capture.set(cv.CAP_PROP_FRAME_HEIGHT, 480)
 
-    print("Detecting_Bike_fuction is now ONLINE")
+    print("[info] Detecting_Bike function is now ONLINE")
     ret, frame = capture.read()
 
     capture.release()
