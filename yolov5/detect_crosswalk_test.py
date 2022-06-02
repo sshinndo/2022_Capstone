@@ -42,6 +42,7 @@ from datetime import datetime
 from multiprocessing import Process, Queue
 import upload_to_server as us
 import detect_bike_road as dbr
+import warning_sound as ws
 import os
 global a, b
 global multi_p
@@ -283,7 +284,8 @@ def run(
                     frame_cnt += 1
 
                     if(frame_cnt >= 5): # 5프레임 연속 위반
-                        print("[info] 5프레임 연속 위반" + datetime.now(tz('Asia/Seoul')))
+                        ws.speak("횡단보도 내에 이륜차가 있습니다")
+                        print("[info] 5프레임 연속 위반" + str(datetime.now(tz('Asia/Seoul'))))
                         # Save target images in temporary folder
                         raw_root = "{}.jpg".format("raw" + str(image_num))
                         result_root = "{}.jpg".format("result" + str(image_num))
