@@ -31,13 +31,13 @@ def main(msg):
     filename = raw_image_route
     save_in = "Detected_raw_images/"
     blob_raw = bucket.blob(save_in + filename)
-    blob_raw.upload_from_filename(filename)
+    blob_raw.upload_from_filename("tmp_raw_images/" + filename)
     blob_raw.make_public()
 
     filename = result_image_route
     save_in = "Detected_result_images/"
     blob_result = bucket.blob(save_in + filename)
-    blob_result.upload_from_filename(filename)
+    blob_result.upload_from_filename("tmp_result_images/" + filename)
     blob_result.make_public()
 
     doc_ref = db.collection(u'Detection').document(u'json')

@@ -18,6 +18,7 @@ def ransac_line_fitting(x, y, r, t):
                 ab_max = ab
                 num_max = numInliers
         return ab_max, num_max
+
     except:
         print("[info] ransec 에러 : 예외처리 되었습니다. 재시도")
         terminal_command = "python detect_crosswalk_test.py --source 0 --weights best_aug3.pt --conf 0.3 --line-thickness 2 --save-txt --save-conf"

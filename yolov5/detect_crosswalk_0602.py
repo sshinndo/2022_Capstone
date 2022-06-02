@@ -1,7 +1,4 @@
 # YOLOv5 🚀 by Ultralytics, GPL-3.0 license
-
-# Run Code
-# python detect_crosswalk_test.py --source 0 --weights best_aug3.pt --conf 0.3 --line-thickness 2 --save-txt --save-conf
 """
 Run inference on images, videos, directories, streams, etc.
 
@@ -27,30 +24,77 @@ Usage - formats:
                                          yolov5s_edgetpu.tflite     # TensorFlow Edge TPU
 """
 
+
+
+
+
 import argparse
+import os
 import sys
 from pathlib import Path
 
-import pandas as pd
 import torch
 import torch.backends.cudnn as cudnn
+import numpy as np
 import cv2 as cv
 
-# CUSTOM Module import [Start]
-from pytz import timezone as tz
-from datetime import datetime
-from multiprocessing import Process, Pool, Queue
-import upload_to_server as us
-import detect_bike_road as dbr
-import numpy as np
-import warning_sound as ws
-import os
-global a, b
-global multi_p
-global pool
-global frame_cnt, image_num
-frame_cnt, image_num = 0, 0
-# CUSTOM Module import [End]
+cnt = 0 #연속된 frame
+num = 1 #이미지 번호
+num2 = 1 #json 번호
+detect_class = "bike" #검출된 class
+
+#//////////////
+
+import datetime
+import pandas as pd
+
+import firebase_admin
+from firebase_admin import credentials
+from firebase_admin import firestore
+from firebase_admin import storage
+
+
+# Firebase 인증서 위치
+certi_route = "capstone-continue-firebase-adminsdk-ubpi1-68bc0133b4.json"
+
+# Firebase initialize
+cred = credentials.Certificate(certi_route)
+firebase_admin.initialize_app(cred, {
+        'projectId' : 'capstone-continue',
+        'storageBucket': 'capstone-continue.appspot.com'
+})
+bucket = storage.bucket()
+db = firestore.client()
+
+
+#/////////////////////
+def Upload(raw_or_result, time, place, case, class_num, image_route):
+    if raw_or_result:
+        save_in = "Detected_result_images/"
+    else:
+        save_in = "Detected_raw_images/"
+    filename = image_route
+    blob = bucket.blob(save_in + filename)
+    blob.upload_from_filename(filename)
+    blob.make_public()
+
+
+    doc_ref = db.collection(u'Detection').document(u'json{}'.format(num2))
+    doc_ref.set({
+        u'time': time,
+        u'place': place,
+        u'case': case,
+        u'class': class_num,
+        u'imageURL': blob.public_url
+    })
+
+    print("Upload Finished")
+
+
+detection_place = "Sejong University Entrance"
+present_time = pd.datetime.today().strftime("%Y-%m-%d %H:%M:%S")
+
+
 
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[0]  # YOLOv5 root directory
@@ -64,11 +108,11 @@ from utils.general import (LOGGER, check_file, check_img_size, check_imshow, che
                            increment_path, non_max_suppression, print_args, scale_coords, strip_optimizer, xyxy2xywh)
 from utils.plots import Annotator, colors, save_one_box
 from utils.torch_utils import select_device, time_sync
+global a, b
+
 flag=0 #flag는 횡단보도 영역 첫 검출
 
 @torch.no_grad()
-def f(x, a1, b1):
-    return a1 * x + b1
 
 def run(
         weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
@@ -125,13 +169,11 @@ def run(
     else:
         dataset = LoadImages(source, img_size=imgsz, stride=stride, auto=pt)
         bs = 1  # batch_size
-
     vid_path, vid_writer = [None] * bs, [None] * bs
 
     # Run inference
     model.warmup(imgsz=(1 if pt else bs, 3, *imgsz))  # warmup
     dt, seen = [0.0, 0.0, 0.0], 0
-
     for path, im, im0s, vid_cap, s in dataset:
         global flag
         t1 = time_sync()
@@ -146,9 +188,8 @@ def run(
         t2 = time_sync()
         dt[0] += t2 - t1
 
-        #자전거 횡단도로 detection
-        #print("/////////////////////////////")
-        #print(a, b)
+
+        #print(a, b) 직선의 기울기, y절편 출력
 
         # Inference
         visualize = increment_path(save_dir / Path(path).stem, mkdir=True) if visualize else False
@@ -161,13 +202,12 @@ def run(
         dt[2] += time_sync() - t3
         #print(pred[0][0])
         #flag는 횡단보도 검출 여부
-        #violate는 횡단보도 영역안에 이륜차 탑승 객체가 있을때 1로 변함
-
+        #violate는 횡단보도 영역안에 이륜차 탑승 객체가 있는 경우 1
         violate = 0
 
-        #만약 횡단보도가 검출 된다면 
+        #만약 횡단보도가 검출 된다면
         cal_pred = pred
-        #print(len(cal_pred[0]))
+        print(len(cal_pred[0]))
         for i in range(len(cal_pred[0])):
           if(cal_pred[0][i][5] == 2):
             flag = flag +1
@@ -177,64 +217,66 @@ def run(
               stand_y_min = cal_pred[0][i][1]
               stand_y_max = cal_pred[0][i][3]
 
-        # 만약 자전거 횡단도로 위에 있다면
-        #abno[0], abno[1]
 
-        # 횡단보도가 검출됬을때  1:bike ride 4:kickboard ride 7:motocycle ride
+
+        #횡단보도가 검출됬을때  1:bike ride 4:kickboard ride 7:motocycle ride
         if flag >= 1:
           for i in range(len(cal_pred[0])):
 
-              global detected_class
+            global detect_class
 
-              if (cal_pred[0][i][5] == 1):
+            if(cal_pred[0][i][5]== 1):
 
-                  vio_stand = (cal_pred[0][i][0] + cal_pred[0][i][2]) / 2
-                  vio_stand_y = (cal_pred[0][i][1] + cal_pred[0][i][3]) / 2
-
-                  # 자전거 도로에서 자전거 달릴시 위법행위 x:
-                  # 왼쪽인지 오른쪽인지에 따라 부등호 방향 바꾸기
-                  if vio_stand > int((vio_stand_y - b) / a):
-                      violate = 0
-
-                  elif (vio_stand < stand_x_max and vio_stand > stand_x_min):
-                      violate = 1
-                      detected_class = "bike"
-
-              if (cal_pred[0][i][5] == 4):
-
-                  vio_stand = (cal_pred[0][i][0] + cal_pred[0][i][2]) / 2
-                  vio_stand_y = (cal_pred[0][i][1] + cal_pred[0][i][3]) / 2
-
-                  if vio_stand > int((vio_stand_y - b) / a):
-                      violate = 0
-
-                  elif (vio_stand < stand_x_max and vio_stand > stand_x_min):
-                      violate = 1
-                      detected_class = "kickboard"
-
-              if (cal_pred[0][i][5] == 7):
-
-                  vio_stand = (cal_pred[0][i][0] + cal_pred[0][i][2]) / 2
-                  vio_stand_y = (cal_pred[0][i][1] + cal_pred[0][i][3]) / 2
-
-                  # 자전거 도로에서 오토바이 달릴 시 위법행위 o:
-                  if vio_stand > int((vio_stand_y - b) / a):
-                      violate = 1
-                      detected_class = "motocycle"
-
-                  if (vio_stand < stand_x_max and vio_stand > stand_x_min):
-                      violate = 1
-                      detected_class = "motocycle"
+              vio_stand = (cal_pred[0][i][0] + cal_pred[0][i][2])/2
+              vio_stand_y = (cal_pred[0][i][1] + cal_pred[0][i][3]) / 2
 
 
-        #print(violate)
+
+              # 자전거 도로에서 자전거 달릴시 위법행위 x:
+              # 왼쪽인지 오른쪽인지에 따라 부등호 방향 바꾸기
+              if vio_stand > int((vio_stand_y - b) / a):
+                violate = 0
+
+              elif(vio_stand<stand_x_max and vio_stand>stand_x_min):
+                violate = 1
+                detect_class = "bike"
+
+            if(cal_pred[0][i][5]== 4):
+
+              vio_stand = (cal_pred[0][i][0] + cal_pred[0][i][2])/2
+              vio_stand_y = (cal_pred[0][i][1] + cal_pred[0][i][3]) / 2
+
+              if vio_stand > int((vio_stand_y - b) / a):
+                violate = 0
+
+              elif(vio_stand<stand_x_max and vio_stand>stand_x_min):
+                violate = 1
+                detect_class = "kickboard"
+
+            if(cal_pred[0][i][5]== 7):
+
+
+              vio_stand = (cal_pred[0][i][0] + cal_pred[0][i][2])/2
+              vio_stand_y = (cal_pred[0][i][1] + cal_pred[0][i][3]) / 2
+
+              # 자전거 도로에서 오토바이 달릴 시 위법행위 o:
+              if vio_stand > int((vio_stand_y - b) / a):
+                violate = 1
+                detect_class = "motocycle"
+
+              if(vio_stand<stand_x_max and vio_stand>stand_x_min):
+                violate = 1
+                detect_class = "motocycle"
+
+        print(violate)
+
 
         # Second-stage classifier (optional)
         # pred = utils.general.apply_classifier(pred, classifier_model, im, im0s)
 
         # Process predictions
         for i, det in enumerate(pred):  # per image
-            #print(det)
+            print(det)
             seen += 1
             if webcam:  # batch_size >= 1
                 p, im0, frame = path[i], im0s[i].copy(), dataset.count
@@ -247,13 +289,12 @@ def run(
             txt_path = str(save_dir / 'labels' / p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')  # im.txt
             s += '%gx%g ' % im.shape[2:]  # print string
             gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
-            imc = im0.copy() if True else im0  # for save_crop
+            imc = im0.copy() if save_crop else im0  # for save_crop
 
-            bg_img = np.zeros((480, 320, 3), np.uint8)
-            bg_img = cv2.putText(bg_img, " CONTINUE ", (90, 30), 3, 0.8, (255, 255, 255), 0)
+
+
 
             annotator = Annotator(im0, line_width=line_thickness, example=str(names))
-
             if len(det):
                 # Rescale boxes from img_size to im0 size
                 det[:, :4] = scale_coords(im.shape[2:], det[:, :4], im0.shape).round()
@@ -263,87 +304,75 @@ def run(
                     n = (det[:, -1] == c).sum()  # detections per class
                     s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "  # add to string
 
-                # Write results 이부분은 입맛대로 출력하기 쉽도록 셋팅된 코드. 알고보니 친절한 YOLOv5
-                # for *xyxy, conf, cls in reversed(det):
-                #     if save_txt:  # Write to file
-                #         xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
-                #         line = (cls, *xywh, conf) if save_conf else (cls, *xywh)  # label format
-                #         with open(f'{txt_path}.txt', 'a') as f:
-                #             f.write(('%g ' * len(line)).rstrip() % line + '\n')
-                #
-                #     if save_img or save_crop or view_img:  # Add bbox to image
-                #         c = int(cls)  # integer class
-                #         label = None if hide_labels else (names[c] if hide_conf else f'{names[c]} {conf:.2f}')
-                #         annotator.box_label(xyxy, label, color=colors(c, True))
-                #     if save_crop:
-                #         save_one_box(xyxy, imc, file=save_dir / 'crops' / names[c] / f'{p.stem}.jpg', BGR=True)
+                # Write results
+                for *xyxy, conf, cls in reversed(det):
+                    if save_txt:  # Write to file
+                        xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
+                        line = (cls, *xywh, conf) if save_conf else (cls, *xywh)  # label format
+                        with open(f'{txt_path}.txt', 'a') as f:
+                            f.write(('%g ' * len(line)).rstrip() % line + '\n')
+
+                    if save_img or save_crop or view_img:  # Add bbox to image
+                        c = int(cls)  # integer class
+                        label = None if hide_labels else (names[c] if hide_conf else f'{names[c]} {conf:.2f}')
+                        annotator.box_label(xyxy, label, color=colors(c, True))
+                    if save_crop:
+                        save_one_box(xyxy, imc, file=save_dir / 'crops' / names[c] / f'{p.stem}.jpg', BGR=True)
+
+
 
             # Stream results
-
             im0 = annotator.result()
-
-            if(flag >= 1):
-                #print("###########################################################################")
-
-                #print(int(stand_x_min),int(stand_y_min),int(stand_x_max),int(stand_y_max))
+            if flag >= 1:
+                print("###########################################################################")
+                red= (0, 0, 255)
+                print(int(stand_x_min),int(stand_y_min),int(stand_x_max),int(stand_y_max))
                 white = (255,255,255)
-                red = (0, 0, 255)
-
-                font = cv2.FONT_HERSHEY_PLAIN
-                im0 = cv2.putText(im0, "Crosswalk", (int(stand_x_min), int(stand_y_min)), font, 2, white, 1, cv2.LINE_8)
-                im0 = cv2.putText(im0, "[Detecting violate]", (00,30), font, 2, (255,255,255), cv2.LINE_4)
+                font =  cv2.FONT_HERSHEY_PLAIN
+                im0 = cv2.putText(im0, "crosswalk", (int(stand_x_min), int(stand_y_min)), font, 2, white, 1, cv2.LINE_8)
+                im0 = cv2.putText(im0, "Find CROSSWALK!! Detecting violate!!", (00,30), font, 2, (255,255,255), cv2.LINE_4)
                 im0 = cv2.rectangle(im0,(int(stand_x_min),int(stand_y_min)),(int(stand_x_max),int(stand_y_max)),red,3)
-
-                #test
-                bg_img = cv2.putText(bg_img, "Crosswalk Set!", (40, 80), 0, 1, (0, 0, 255), 2)
-
-
 
                 y1 = b
                 y2 = 640 * a + b
                 im0 = cv.line(im0, (0, int(y1)), (640, int(y2)), (255, 0, 0), 2)
 
 
-                if violate == 1:
-                    global frame_cnt, image_num
-                    # Add words in image
+                if violate == 0:
+                    global cnt
+                    cnt = 0
+
+                elif violate == 1:
+
                     red = (0, 0, 255)
+                    # 폰트 지정
                     font = cv2.FONT_HERSHEY_PLAIN
-                    im0 = cv2.putText(im0, "(violate)", (350, 40), font, 2, red, 1, cv2.LINE_AA)
-                    bg_img = cv2.putText(bg_img, "Detected Violate", (30, 130), 0, 1, (0, 0, 255), 3)
+                    # 이미지에 글자 합성하기
+                    im0 = cv2.putText(im0, "violate!!!!", (350, 40), font, 2, red, 1, cv2.LINE_AA)
 
-                    frame_cnt += 1
+                    global num
+                    global num2
+                    global present_time
 
-                    if(frame_cnt >= 5): # 5프레임 연속 위반
-                        # ws.speak("횡단보도 내에 이륜차가 있습니다")
-                        print("[info] 5프레임 연속 위반 " + str(datetime.now(tz('Asia/Seoul'))))
-                        # Save target images in temporary folder
+                    cnt = cnt + 1
+                    print(cnt)
+                    if cnt >= 5:
+                        cv2.imwrite('result{}.jpg'.format(num), im0)
+                        cv2.imwrite('raw{}.jpg'.format(num), imc)
 
-                        raw_root = "{}.jpg".format("raw_" + str(datetime.now(tz('Asia/Seoul')).strftime("%Y%m%d_%H_%M_%S")))
-                        result_root = "{}.jpg".format("result_" + str(datetime.now(tz('Asia/Seoul')).strftime("%Y%m%d_%H_%M_%S")))
+                        Upload(1, present_time, detection_place, 3, detect_class, "result{}.jpg".format(num))
+                        Upload(0, present_time, detection_place, 3, detect_class, "raw{}.jpg".format(num))
 
-                        cv2.imwrite("tmp_raw_images/" + raw_root, imc)
-                        cv2.imwrite("tmp_result_images/" + result_root, im0)
+                        present_time = pd.datetime.today().strftime("%Y-%m-%d %H:%M:%S")
+                        num2 = num2 + 1
+                        num = num + 1
 
-                        image_num += 1
-                        frame_cnt = 0
-
-                        # hand over json data to multi-processor by Queue
-                        present_time = datetime.now(tz('Asia/Seoul')).strftime("%Y-%m-%d %H:%M:%S")
-                        place = "Front AI center"
-                        detected_case = 3
-
-                        us.main([present_time, place, detected_case, detected_class, raw_root, result_root])
+                        cnt = 0
+                        print(cnt)
 
             if view_img:
-                img_addh = cv2.hconcat([bg_img, im0])
-                cv2.imshow("USER GUI", img_addh)
-                #cv2.imshow("USER GUI", im0)
-                key = cv2.waitKey(1)  # 1 millisecond
-
-            if key == ord('q') or key == 27:
-                LoadStreams.stop(LoadStreams.__class__)
-                exit()
+                cv2.imshow(str(p), im0)
+                cv2.waitKey(1)  # 1 millisecond
 
             # Save results (image with detections)
             if save_img:
@@ -355,12 +384,13 @@ def run(
                     # 이미지에 글자 합성하기
                     im0 = cv2.putText(im0, "violate!!!!", (350, 40), font, 2, white, 1, cv2.LINE_AA)
                   cv2.imwrite(save_path, im0)
+
                 else:  # 'video' or 'stream'
-                    #print(flag)
+                    print(flag)
                     if(flag >= 1):
-                          #print("###########################################################################")
+                          print("###########################################################################")
                           red= (0, 0, 255)
-                          #print(int(stand_x_min),int(stand_y_min),int(stand_x_max),int(stand_y_max))
+                          print(int(stand_x_min),int(stand_y_min),int(stand_x_max),int(stand_y_max))
                           im0 = cv2.rectangle(im0,(int(stand_x_min),int(stand_y_min)),(int(stand_x_max),int(stand_y_max)),red,3)
                     if vid_path[i] != save_path:  # new video
                         vid_path[i] = save_path
@@ -378,7 +408,7 @@ def run(
                     vid_writer[i].write(im0)
 
         # Print time (inference-only)
-        #LOGGER.info(f'{s}Done. ({t3 - t2:.3f}s)')
+        LOGGER.info(f'{s}Done. ({t3 - t2:.3f}s)')
 
     # Print results
     t = tuple(x / seen * 1E3 for x in dt)  # speeds per image
@@ -424,16 +454,99 @@ def parse_opt():
     return opt
 
 
-def main(opt):
+def detect_bike_road():
     global a, b
+    import numpy as np
+
+    capture = cv.VideoCapture(0)
+    capture.set(cv.CAP_PROP_FRAME_WIDTH, 640)
+    capture.set(cv.CAP_PROP_FRAME_HEIGHT, 480)
+
+    while cv.waitKey(33) < 0:
+        ret, frame = capture.read()
+        cv.imshow("VideoFrame", frame)
+
+    capture.release()
+    cv.destroyAllWindows()
+
+    src = cv.cvtColor(frame, cv.COLOR_BGR2HSV)
+    dst = cv.inRange(src, (170, 30, 0), (180, 255, 255))
+    dst2 = cv.inRange(src, (0, 30, 0), (10, 255, 255))
+
+    h4 = cv.addWeighted(dst, 1.0, dst2, 1, 0)
+
+    bike_road = cv.bitwise_and(src, src, mask=h4)
+    bike_road = cv.cvtColor(bike_road, cv.COLOR_HSV2BGR)
+
+    bike_road_gray = cv.cvtColor(bike_road, cv.COLOR_BGR2GRAY)
+
+    for i in range(bike_road_gray.shape[1]):
+        for j in range(bike_road_gray.shape[0]):
+            if (bike_road_gray[j][i] > 0):
+                bike_road_gray[j][i] = 255
+
+    bike_road_gray_no = cv.medianBlur(bike_road_gray, 5)
+
+    lx = cv.Sobel(bike_road_gray_no, ddepth=cv.CV_64F, dx=1, dy=0, ksize=3)
+    ly = cv.Sobel(bike_road_gray_no, ddepth=cv.CV_64F, dx=0, dy=1, ksize=3)
+    mag = np.sqrt(np.square(lx) + np.square(ly))
+    ori = np.arctan2(ly, lx) * 180 / np.pi
+
+    lx_ = (lx - lx.min()) / (lx.max() - lx.min()) * 255
+    ly_ = (ly - ly.min()) / (ly.max() - ly.min()) * 255
+    mag_ = (mag - mag.min()) / (mag.max() - mag.min()) * 255
+    ori_ = (ori - ori.min()) / (ori.max() - ori.min()) * 255
+
+
+    result2 = np.zeros(bike_road_gray_no.shape)
+    id2 = np.where((mag > 100) & (ori > 0) & (ori < 40))
+    result2[id2] = 255
+
+    result3 = np.zeros(bike_road_gray_no.shape)
+    id3 = np.where((mag > 100) & (ori > 150) & (ori < 200))
+    result3[id3] = 255
+
+
+    import numpy as np
+
+
+    def ransac_line_fitting(x, y, r, t):
+        iter = np.round(np.log(1 - 0.999) / np.log(1 - (1 - r) ** 2) + 1)
+        num_max = 0
+        for i in np.arange(iter):
+            id = np.random.permutation(len(x))
+            xs = x[id[:2]]
+            ys = y[id[:2]]
+            A = np.vstack([xs, np.ones(len(xs))]).T
+            ab = np.dot(np.linalg.inv(np.dot(A.T, A)), np.dot(A.T, ys))
+            dist = np.abs(ab[0] * x - y + ab[1]) / np.sqrt(ab[0] ** 2 + 1)
+            numInliers = sum(dist < t)
+            if numInliers > num_max:
+                ab_max = ab
+                num_max = numInliers
+        return ab_max, num_max
+
+
+    xno = id2[1]
+    yno = id2[0]
+    abno, max = ransac_line_fitting(xno, yno, 0.5, 2)
+
+    print(abno[0], abno[1])
+
+    #y1 = f(0, abno[0], abno[1])
+    #y2 = f(src.shape[1], abno[0], abno[1])
+
+    a = abno[0]
+    b = abno[1]
+
+
+def main(opt):
     check_requirements(exclude=('tensorboard', 'thop'))
-    a , b = dbr.main() # Detect_bike_road()
+
+    detect_bike_road()
     run(**vars(opt))
+
 
 if __name__ == "__main__":
     opt = parse_opt()
     main(opt)
-
-# https://capstone-continue.web.app/
-
-# python detect_crosswalk_test.py --source 0 --weights best_aug3.pt --conf 0.3 --line-thickness 2 --save-txt --save-conf
