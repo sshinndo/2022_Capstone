@@ -39,13 +39,14 @@ import cv2 as cv
 # CUSTOM Module import [Start]
 from pytz import timezone as tz
 from datetime import datetime
-from multiprocessing import Process, Queue
+from multiprocessing import Process, Pool, Queue
 import upload_to_server as us
 import detect_bike_road as dbr
 import warning_sound as ws
 import os
 global a, b
 global multi_p
+global pool
 global frame_cnt, image_num
 frame_cnt, image_num = 0, 0
 # CUSTOM Module import [End]
@@ -264,7 +265,7 @@ def run(
                 red= (0, 0, 255)
                 #print(int(stand_x_min),int(stand_y_min),int(stand_x_max),int(stand_y_max))
                 white = (255,255,255)
-                font =  cv2.FONT_HERSHEY_PLAIN
+                font = cv2.FONT_HERSHEY_PLAIN
                 im0 = cv2.putText(im0, "crosswalk", (int(stand_x_min), int(stand_y_min)), font, 2, white, 1, cv2.LINE_8)
                 im0 = cv2.putText(im0, "Find CROSSWALK!! Detecting violate!!", (00,30), font, 2, (255,255,255), cv2.LINE_4)
                 im0 = cv2.rectangle(im0,(int(stand_x_min),int(stand_y_min)),(int(stand_x_max),int(stand_y_max)),red,3)
@@ -301,17 +302,14 @@ def run(
                         place = "Front AI center"
                         detected_case = 3
                         detected_class = 1
-                        send_q.put([present_time, place, detected_case, detected_class, raw_root, result_root])
 
-
+                        us.main([present_time, place, detected_case, detected_class, raw_root, result_root])
 
             if view_img:
                 cv2.imshow(str(p), im0)
                 key = cv2.waitKey(1)  # 1 millisecond
 
             if key == ord('q') or key == 27:
-                global multi_p
-                multi_p.join()
                 LoadStreams.stop(LoadStreams.__class__)
                 exit()
 
@@ -346,8 +344,6 @@ def run(
                         save_path = str(Path(save_path).with_suffix('.mp4'))  # force *.mp4 suffix on results videos
                         vid_writer[i] = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
                     vid_writer[i].write(im0)
-
-
 
         # Print time (inference-only)
         #LOGGER.info(f'{s}Done. ({t3 - t2:.3f}s)')
@@ -395,33 +391,16 @@ def parse_opt():
     print_args(vars(opt))
     return opt
 
-def info(title):
-    print('#############################')
-    print(title)
-    print('Multi-Processor information')
-    print('parent process:', os.getppid())
-    print('process id:', os.getpid())
-    print('#############################')
-
-def SendtoServer(q):
-    info('[info] Send_to_Server function is now ONLINE')
-    while (1):
-        if (not q.empty()):
-            us.main(q.get())
 
 def main(opt):
-    global a, b
-    global multi_p, send_q
-    send_q = Queue() # Queue for Multi-Processor (Not python Queue)
-    multi_p = Process(target=SendtoServer, args=(send_q,))
-    multi_p.start()
-
     check_requirements(exclude=('tensorboard', 'thop'))
-    a, b = dbr.main() # Detect_bike_road()
+    # a, b = dbr.main() # Detect_bike_road()
     run(**vars(opt))
 
 if __name__ == "__main__":
     opt = parse_opt()
     main(opt)
+
+# https://capstone-continue.web.app/
 
 # python detect_crosswalk_test.py --source 0 --weights best_aug3.pt --conf 0.3 --line-thickness 2 --save-txt --save-conf
